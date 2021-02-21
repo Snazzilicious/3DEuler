@@ -103,7 +103,7 @@ def parseMesh(filename):
 		#get group data
 		for j in range(groupSizes[i]):
 			line = meshFile.readline().split()
-			for k in range(2):
+			for k in range(DIMENSION):
 				ind = int(line[-(1+k)])
 				if ind in fromInd: # must adjust for deleted nodes
 					ind = fromInd.index(ind)
@@ -308,12 +308,64 @@ class spMatBuilder:
 
 
 
+def makeStiffnessMatrix():
+	
+	builder = spMatBuilder(nNodes)
+	
+	for elem in range(nElem):
+		for i in range(DIMENSION+1):
+			for j in range(DIMENSION+1):
+				vert1 = ElemVertInds[elem,i]
+				vert2 = ElemVertInds[elem,j]
+				# TODO consider normalizing gradients to emphasize averaging term, not true Laplacian
+				grad1 = basisCoeffs[elem,:DIMENSION,i] 
+				grad2 = basisCoeffs[elem,:DIMENSION,j]
+				
+				val = Volumes[elem]*grad1.dot(grad2)
+				builder.addEntry(vert1,vert2,val)
+	
+	return builder
 
 
 
+def makeMixedMatrices():
+	
+	builder1 = spMatBuilder(nNodes)
+	builder2 = spMatBuilder(nNodes)
+	builder2 = spMatBuilder(nNodes)
+	
+	for elem in range(nElem):
+		for i in range(DIMENSION+1):
+			for j in range(DIMENSION+1):
+				vert1 = ElemVertInds[elem,i]
+				vert2 = ElemVertInds[elem,j]
+				
+				grad1 = basisCoeffs[elem,:DIMENSION,i] 
+				
+				val1 = Volumes[elem]*grad1[0]/4.0
+				val2 = Volumes[elem]*grad1[1]/4.0
+				val3 = Volumes[elem]*grad1[2]/4.0
+				
+				builder1.addEntry(vert1,vert2,val1)
+				builder2.addEntry(vert1,vert2,val2)
+				builder3.addEntry(vert1,vert2,val3)
 
-
-
+	# Boundary terms at the surface of the object
+	GID = groupNames.index( 'Body' )	
+	normal = np.zeros([DIMENSION])
+	for elem in range(nElem):
+		# see which nodes belong to the body
+		bodyNodes = [ ElemVertInds[elem,i] in groupMembers[GID] for i in range(DIMENSION+1) ]
+		
+		# if a face of the element is a piece of the body
+		if np.sum(bodyNodes) == DIMENSION:
+			notBodyNodes = [not val for val in bodyNodes]
+		
+			vert1 = ElemVertInds[elem,bodyNodes][0]
+			vert2 = ElemVertInds[elem,bodyNodes][1]
+			nodeCoords = VertCoords[ ElemVertInds[elem,bodyNodes], : ]
+			
+			#TODO compute outward normal
 
 
 
