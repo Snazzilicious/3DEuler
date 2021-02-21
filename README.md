@@ -1,2 +1,2 @@
 # 3DEuler
-Simulates 3D Inviscid flow
+Simulates Steady Inviscid flow
