@@ -52,7 +52,7 @@ def parseMesh(filename):
 	nElem = int(line[-1])
 
 	#get indices of element vertices
-	ElemVertInds = np.zeros([nElem,DIMENSION+1]).astype(int)
+	ElemVertInds = np.zeros([nElem,DIMENSION+1], dtype=int)
 	for i in range(nElem):
 		line = meshFile.readline().split()
 		for j in range(DIMENSION+1):
@@ -89,7 +89,7 @@ def parseMesh(filename):
 	nGroups = int(line[-1])
 
 
-	groupSizes = np.zeros(nGroups).astype(int)
+	groupSizes = np.zeros(nGroups, dtype=int)
 	groupNames = ["" for _ in range(nGroups)]
 	groupMembers = [[] for _ in range(nGroups)]
 # TODO make sure this works
@@ -133,7 +133,7 @@ def makeGridFile(vertexIndices, vertexCoords, filename):
 	numCells = vertexIndices.shape[0]
 	
 	
-	cellData = 4*np.ones([numCells,5]).astype(int)
+	cellData = 4*np.ones([numCells,5], dtype=int)
 	cellData[:,1:] = vertexIndices[:,:]
 	
 	f = open(filename,'w')
@@ -246,7 +246,7 @@ class spMatBuilder:
 	def __init__(self, N):
 		self.N = N
 		self.dat=[]
-		self.rowPtr=np.zeros(N+1).astype(int)
+		self.rowPtr=np.zeros(N+1, dtype=int)
 		self.colInds = []
 		
 	def addEntry(self,i,j,val):
@@ -332,7 +332,7 @@ def makeMixedMatrices():
 	
 	builder1 = spMatBuilder(nNodes)
 	builder2 = spMatBuilder(nNodes)
-	builder2 = spMatBuilder(nNodes)
+	builder3 = spMatBuilder(nNodes)
 	
 	for elem in range(nElem):
 		for i in range(DIMENSION+1):
@@ -351,8 +351,7 @@ def makeMixedMatrices():
 				builder3.addEntry(vert1,vert2,val3)
 
 	# Boundary terms at the surface of the object
-	GID = groupNames.index( 'Body' )	
-	normal = np.zeros([DIMENSION])
+	GID = groupNames.index( 'Body' )
 	for elem in range(nElem):
 		# see which nodes belong to the body
 		bodyNodes = [ ElemVertInds[elem,i] in groupMembers[GID] for i in range(DIMENSION+1) ]
@@ -361,23 +360,76 @@ def makeMixedMatrices():
 		if np.sum(bodyNodes) == DIMENSION:
 			notBodyNodes = [not val for val in bodyNodes]
 		
-			vert1 = ElemVertInds[elem,bodyNodes][0]
-			vert2 = ElemVertInds[elem,bodyNodes][1]
 			nodeCoords = VertCoords[ ElemVertInds[elem,bodyNodes], : ]
 			
-			#TODO compute outward normal
+			# compute outward normal
+			V1 = nodeCoords[0,:] - nodeCoords[1,:]
+			V2 = nodeCoords[2,:] - nodeCoords[1,:]
+			
+			normal = np.cross(V1,V2)
+			SA = np.linalg.norm(normal)/2.0
+
+			outward = VertCoords[ ElemVertInds[elem,notBodyNodes], : ] - nodeCoords[1,:]
+
+			# Make sure is inward and unit
+			normal *= -np.sign( outward.dot(normal) )
+			normal /= np.linalg.norm(normal)
+
+			# Insert correct expression into matrices
+			for vert1 in ElemVertInds[elem,bodyNodes]:
+				for vert2 in ElemVertInds[elem,bodyNodes]:
+					if vert1 == vert2:
+						denom = 6.0
+					else:
+						denom = 12.0
+					
+					builder1.addEntry( vert1,vert2, -(normal[0]*SA)/denom )
+					builder2.addEntry( vert1,vert2, -(normal[1]*SA)/denom )
+					builder3.addEntry( vert1,vert2, -(normal[2]*SA)/denom )
+			
+
+	return builder1,builder2,builder3
 
 
 
+def getBodyOutwardNormals():
+	global bodyNodeNormals
 
+	GID = groupNames.index( 'Body' )
+	
+	bodyNodeNormals = np.zeros([len(groupMembers[GID]),DIMENSION])
+	numContriubtors = np.zeros( len(groupMembers[GID]), dtype=int )
+	
+	for elem in range(nElem):
+		# see which nodes belong to the body
+		bodyNodes = [ ElemVertInds[elem,i] in groupMembers[GID] for i in range(DIMENSION+1) ]
+		
+		# if a face of the element is a piece of the body
+		if np.sum(bodyNodes) == DIMENSION:
+			notBodyNodes = [not val for val in bodyNodes]
+		
+			nodeCoords = VertCoords[ ElemVertInds[elem,bodyNodes], : ]
+			
+			# compute outward normal
+			V1 = nodeCoords[0,:] - nodeCoords[1,:]
+			V2 = nodeCoords[2,:] - nodeCoords[1,:]
+			
+			normal = np.cross(V1,V2)
 
+			outward = VertCoords[ ElemVertInds[elem,notBodyNodes], : ] - nodeCoords[1,:]
 
+			# Make sure is outward
+			normal *= np.sign( outward.dot(normal) )
+	
+			globalInds = ElemVertInds[elem,bodyNodes]
+			for ind in globalInds:
+				groupInd = groupMembers[GID].index(ind)
+				bodyNodeNormals[groupInd,:] += normal
+				numContriubtors[groupInd] += 1
 
-
-
-
-
-
+	# Take the average and normalize		
+	bodyNodeNormals /= numContriubtors.reshape([-1,1])
+	bodyNodeNormals /= np.sqrt(np.sum(bodyNodeNormals**2,1)).reshape([-1,1])
 
 
 
